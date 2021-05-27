@@ -114,6 +114,7 @@ def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, d
 
     # TODO: Also return predictors maybe for testing?
     # TODO: Potentially do stuff with validation scores and test dataset
+    # TODO: Also return configuration for q_strat
     if test_ratio:
         raise NotImplementedError("Implement final part with test dataset")
 
