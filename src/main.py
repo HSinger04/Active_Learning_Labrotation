@@ -1,3 +1,4 @@
+import re
 import argparse
 import json
 import numpy as np
@@ -5,17 +6,109 @@ import scipy.sparse
 from sklearn.ensemble import *
 from sklearn.datasets import *
 from sklearn.model_selection import ParameterSampler, KFold, train_test_split
+from sklearn.metrics import *
 from modAL import ActiveLearner
+from time import time
 
 from query_strategies import call_q_strat
 
+MODELS = "models"
+VAL_SCORES = "val_scores"
+DEF_SCORE = "def_score"
 
-def train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict, labeled_ratio, pred_class):
+
+def _extr_last_slash_ind(string):
+    indices = [m.start(0) for m in re.finditer("/", string)]
+    if indices:
+        return sorted(indices[-1])
+    # if there is no "/", just return original string
+    else:
+        return string
+
+def _get_metrics(learner, X, y_true, metrics):
+    """Get various metric scores for learner on X
+
+    :param learner: the learner to evaluate
+    :param X: dataset to evaluate metrics on
+    :param y_true: true labels of X
+    :param metrics: dict of metric functions that use y_true, y_pred as args
+    :return: dict with scores
+    """
+    metrics_vals = {}
+    metrics_vals[DEF_SCORE] = learner.score(X, y_true)
+    y_pred = learner.predict(X)
+    for name, metric in metrics.items():
+        metrics_vals[name] = metric(y_true, y_pred)
+
+    return metrics_vals
+
+
+def _load_data(built_in_data, data_name, test_ratio):
+    """
+
+    :param built_in_data: True iff sklearn dataset is to be used
+    :param data_name: sklearn dataset or path to a dataset
+    :param test_ratio: What ratio to use for test set relative to total set
+    """
+    # dataset place holders
+    X = None
+    y = None
+    X_train_and_val = None
+    X_test = None
+    y_train_and_val = None
+    y_test = None
+
+    if built_in_data:
+        data_loader = eval(data_name)
+        # datasets where one can specify a subset argument
+        if data_name in {"fetch_20newsgroups", "fetch_20newsgroups_vectorized", "fetch_lfw_pairs", "fetch_rcv1"}:
+            X_train_and_val, y_train_and_val = data_loader(return_X_y=True, subset="train")
+            X_test, y_test = data_loader(return_X_y=True, subset="test")
+            # TODO
+            """
+            # HACK: shrink feature dimension to avoid OOM error
+            if data_name == "fetch_20newsgroups_vectorized":
+                feat_dim = X_train_and_val.shape[1]
+                # Shrink feature dim to around 2000
+                filter_idx = np.arange(feat_dim, step=feat_dim // 2000)
+                mask = np.zeros(feat_dim, dtype=bool)
+                mask[filter_idx] = True
+                X_train_and_val = X_train_and_val[:, mask]
+                X_test = X_test[:, mask]
+            """
+        else:
+            X, y = data_loader(return_X_y=True)
+    else:
+        raise NotImplementedError("No support for non sklearn dataset yet.")
+
+    # Only split if we don't have a dataset with a test set already
+    if X_test == None:
+        # ...and we want to split the set in the first place
+        if test_ratio:
+            X_train_and_val, X_test, y_train_and_val, y_test = train_test_split(X, y, test_size=test_ratio)
+        # if no test set, use all of X and y for train_and_val
+        else:
+            X_train_and_val = X
+            y_train_and_val = y
+
+    return X_train_and_val, y_train_and_val, X_test, y_test
+
+
+def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict, labeled_ratio, pred_class, metrics):
     # dictionary that keeps track of avg. validation score per model
-    val_scores = {}
+    to_track = {}
 
     for hyper_params in sampler:
-        local_val_scores = []
+        # initialize local_val_scores with empty lists
+        local_val_scores = {DEF_SCORE: []}
+        for name in metrics.keys():
+            local_val_scores[name] = []
+
+        # initialize list for tracking models
+        models = []
+
+        time_diffs = []
+
         for train_ind, val_ind in train_and_val_splitter.split(X_train_and_val):
 
             # Define validation dataset
@@ -32,10 +125,19 @@ def train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_s
             predictor = pred_class(**hyper_params)
             learner = ActiveLearner(predictor, call_q_strat, X_training=X_training, y_training=y_training)
 
+            # for tracking time
+            local_time_diffs = []
+
+            init_num_X_pool = X_pool.shape[0]
             # TODO: Feel free to use condition of your choice
-            while X_pool.shape[0] > 0:
+            while X_pool.shape[0] > init_num_X_pool // 2:
+                # query and track time
+                start = time()
                 query_idx, _ = learner.query(X_pool, X_training, q_strat_name, q_strat_dict)
+                local_time_diffs.append(time() - start)
+                # teach learner
                 learner.teach(X_pool[query_idx], y_pool[query_idx])
+
                 # Move queried pool data to labeled data
                 if isinstance(X_training, np.ndarray):
                     X_training = np.concatenate((X_training, X_pool[query_idx]))
@@ -46,26 +148,70 @@ def train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_s
                 y_training = np.concatenate((y_training, y_pool[query_idx]))
 
                 # Delete explored X_pool data
-                if isinstance(X_training, np.ndarray):
-                    X_pool = np.delete(X_pool, query_idx, axis=0)
-                elif isinstance(X_training, scipy.sparse.csr_matrix):
-                    mask = np.ones(X_pool.shape[0], dtype=bool)
-                    mask[query_idx] = False
-                    X_pool = X_pool[mask]
-                else:
-                    raise NotImplementedError("X_pool neither ndarray nor csr_matrix")
-
+                mask = np.ones(X_pool.shape[0], dtype=bool)
+                mask[query_idx] = False
+                X_pool = X_pool[mask]
                 y_pool = np.delete(y_pool, query_idx, axis=0)
 
-            # track validation score
-            score_val = learner.score(X_val, y_val)
-            local_val_scores.append(score_val)
+            # track time
+            time_diffs.append(np.mean(local_time_diffs))
 
-        val_scores[str(hyper_params)] = local_val_scores
-    return val_scores
+            # track validation scores
+            metric_scores = _get_metrics(learner, X_val, y_val, metrics)
+            for name, metric_score in metric_scores.item():
+                local_val_scores[name].append(metric_score)
+
+            # track learner
+            models.append(learner)
+
+        # record val score for this hyper param setting
+        to_track[str(hyper_params)] = {VAL_SCORES: local_val_scores,
+                                       MODELS: models,
+                                       "time_diffs": time_diffs}
+
+    return to_track
 
 
-def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, data_name, test_ratio, train_ratio, labeled_ratio, splitter):
+def _test(tracked_info, X_test, y_test, metrics):
+    for k, v in tracked_info.items():
+        # test model with best DEF_SCORE
+        best_mod_idx = np.argsort(v[VAL_SCORES][DEF_SCORE])[-1]
+        # TODO: Confirm that the highest score model's ind gets extracted
+        test_model = v[MODELS][best_mod_idx]
+        v["test_scores"] = _get_metrics(test_model, X_test, y_test, metrics)
+
+    # TODO: confirm that tracked_info looks the way it should
+    return tracked_info
+
+
+def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_strat_dict, data_name):
+    # remove unnecessary information
+    for v in tracked_info.values():
+        # TODO: Confirm that entries really get deleted
+        del v[MODELS]
+
+    # remove potential slash
+    if result_dir[-1] == "/":
+        result_dir = result_dir[:-1]
+
+    # record some information
+    # TODO: Check if recorded
+    tracked_info["q_strat_config"] = q_strat_dict
+
+    # TODO: Check
+    params_part = _extr_last_slash_ind(params)
+    q_strat_part = _extr_last_slash_ind(q_strat_dict_path)
+    data_part = _extr_last_slash_ind(data_name)
+
+    AND = "_AND_"
+
+    # Save information
+    with open(result_dir + "/" + params_part + AND + q_strat_part + AND + data_part, "w") as result_file:
+        json.dump(tracked_info, result_file)
+
+
+def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, data_name, metrics_path,
+         test_ratio, train_ratio, labeled_ratio, splitter, result_dir):
     pred_class = eval(pred)
 
     # Initiate parameter sampler
@@ -74,49 +220,34 @@ def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, d
         params_dict = json.load(p)
         sampler = ParameterSampler(params_dict, n_iter)
 
+    # Get the kwargs for our q_strat
     q_strat_dict = {}
     if q_strat_dict_path:
         with open(q_strat_dict_path) as q:
             q_strat_dict = json.load(q)
 
-    # dataset place holders
-    X = None
-    y = None
-    X_train_and_val = None
-    X_test = None
-    y_train_and_val = None
-    y_test = None
+    # load metrics dict
+    metrics = {}
+    if metrics_path:
+        with open(metrics_path) as m:
+            metrics = json.load(m)
+    for k, v in metrics.items():
+        metrics[k] = eval(v)
 
-    if built_in_data:
-        data_loader = eval(data_name)
-        if data_name in {"fetch_20newsgroups", "fetch_20newsgroups_vectorized", "fetch_lfw_pairs", "fetch_rcv1"}:
-            X_train_and_val, y_train_and_val = data_loader(return_X_y=True, subset="train")
-            X_test, y_test = data_loader(return_X_y=True, subset="test")
-        else:
-            X, y = data_loader(return_X_y=True)
-    else:
-        raise NotImplementedError("Haven't gotten around to this yet.")
+    # Load data
+    X_train_and_val, y_train_and_val, X_test, y_test = _load_data(built_in_data, data_name, test_ratio)
 
-    # Only split if we don't have a dataset with a test set already
-    if X_test == None:
-        # ...and we want to split the set in the first place
-        if test_ratio:
-            X_train_and_val, X_test, y_train_and_val, y_test = train_test_split(X, y, test_size=test_ratio)
-        # if no test set, use all of X and y for train_and_val
-        else:
-            X_train_and_val = X
-            y_train_and_val = y
-
+    # Object that will do e.g. KFold-Cross-Validation for us
     train_and_val_n_splits = int(1 / (1 - train_ratio))
     train_and_val_splitter = eval(splitter)(n_splits=train_and_val_n_splits)
 
-    val_scores = train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict, labeled_ratio, pred_class)
+    tracked_info = _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict,
+                          labeled_ratio, pred_class, metrics)
 
-    # TODO: Also return predictors maybe for testing?
-    # TODO: Potentially do stuff with validation scores and test dataset
-    # TODO: Also return configuration for q_strat
     if test_ratio:
-        raise NotImplementedError("Implement final part with test dataset")
+        tracked_info = _test(tracked_info, X_test, y_test, metrics)
+
+    _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_strat_dict, data_name)
 
 
 if __name__ == '__main__':
@@ -132,10 +263,13 @@ if __name__ == '__main__':
     parser.add_argument('--built_in_data', type=bool,
                         help='Currently, always set True. True iff sklearn dataset is to be used', default='True')
     parser.add_argument('--data_name', type=str, help='sklearn dataset or path to a dataset')
+    parser.add_argument('--metrics_path', type=str, help='Path to metrics settings.'
+                                                         'If left out, only learner.score will be tracked.', default="")
     parser.add_argument('--test_ratio', type=float, help='What ratio to use for test set relative to total set')
-    parser.add_argument('--train_ratio', type=float, help='What ratio to use for train set relative to validation set')
+    parser.add_argument('--train_ratio', type=float, help='What ratio to use for _train set relative to validation set')
     parser.add_argument('--labeled_ratio', type=float,
                         help='What ratio to use as initial labeled set for active learning')
     parser.add_argument('--splitter', type=str, help='What sklearn Splitter Class to use', default='KFold')
+    parser.add_argument('--result_dir', type=str, help='Where to save results. If default, will save in ../results', default='../results')
 
     main(**vars(parser.parse_args()))
