@@ -7,8 +7,6 @@ from sklearn.metrics import pairwise_distances
 from scipy.sparse import csr_matrix
 from scipy.spatial.distance import cdist
 
-BATCH_SIZE = 200000
-
 # TODO: Normalize using some library e.g. sklearn
 def _normalize(x):
     """
@@ -89,7 +87,7 @@ def _sorted_pairwise_dist(x, y, metric, batch_size):
 
         # collect the last part
         x_batch = x[x_batch_idx[-1]:]
-        x_dist_batch = _x_dist_batch((x_batch, y, y_batch_idx, metric))
+        x_dist_batch = _x_dist_batch(x_batch, y, y_batch_idx, metric)
         # record
         dist.append(x_dist_batch)
         # turn into np.ndarray
@@ -110,7 +108,7 @@ def _gu_uncertainty(rf, X_pool):
     :return: normalized uncertainty from Gu, Zydek and Jin 2015
     """
     # class_probs must be of the kind that more is better e.g. probability
-    # FIXME:     Note that sklearn assigns probabilities rather than
+    # HACK: Note that sklearn assigns probabilities rather than
     #     the number of votes to an example!
     class_probs = rf.predict_proba(X_pool)
     sorted_probs = np.sort(class_probs, axis=1)
@@ -152,7 +150,7 @@ def _gu_diversity(X_pool, X_training, batch_size, k=1, metric="sqeuclidean"):
 
 
 def gu_sampling(rf, X_pool, X_training, version, k_den, k_div=1,
-                metric_den="sqeuclidean", metric_div="sqeuclidean", batch_size=BATCH_SIZE, weights=[1, 1, 1], n_iter=1):
+                metric_den="sqeuclidean", metric_div="sqeuclidean", batch_size=9999999, weights=[1, 1, 1], n_iter=1):
     """ Performs sampling based on Gu, Zydek and Jin 2015
 
     :param rf: sklearn random forest

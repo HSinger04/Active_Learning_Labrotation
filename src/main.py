@@ -20,7 +20,9 @@ DEF_SCORE = "def_score"
 def _extr_last_slash_ind(string):
     indices = [m.start(0) for m in re.finditer("/", string)]
     if indices:
-        return sorted(indices[-1])
+        string = string[indices[-1]+1:]
+        string = re.sub(".json", "", string)
+        return string
     # if there is no "/", just return original string
     else:
         return string
@@ -158,7 +160,7 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
 
             # track validation scores
             metric_scores = _get_metrics(learner, X_val, y_val, metrics)
-            for name, metric_score in metric_scores.item():
+            for name, metric_score in metric_scores.items():
                 local_val_scores[name].append(metric_score)
 
             # track learner
@@ -176,11 +178,9 @@ def _test(tracked_info, X_test, y_test, metrics):
     for k, v in tracked_info.items():
         # test model with best DEF_SCORE
         best_mod_idx = np.argsort(v[VAL_SCORES][DEF_SCORE])[-1]
-        # TODO: Confirm that the highest score model's ind gets extracted
         test_model = v[MODELS][best_mod_idx]
         v["test_scores"] = _get_metrics(test_model, X_test, y_test, metrics)
 
-    # TODO: confirm that tracked_info looks the way it should
     return tracked_info
 
 
@@ -195,7 +195,6 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
         result_dir = result_dir[:-1]
 
     # record some information
-    # TODO: Check if recorded
     tracked_info["q_strat_config"] = q_strat_dict
 
     # TODO: Check
@@ -203,7 +202,7 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
     q_strat_part = _extr_last_slash_ind(q_strat_dict_path)
     data_part = _extr_last_slash_ind(data_name)
 
-    AND = "_AND_"
+    AND = ", "
 
     # Save information
     with open(result_dir + "/" + params_part + AND + q_strat_part + AND + data_part, "w") as result_file:
@@ -244,9 +243,11 @@ def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, d
     tracked_info = _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict,
                           labeled_ratio, pred_class, metrics)
 
+    # test if there should be a test
     if test_ratio:
         tracked_info = _test(tracked_info, X_test, y_test, metrics)
 
+    # save important information
     _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_strat_dict, data_name)
 
 
@@ -258,11 +259,12 @@ if __name__ == '__main__':
                                                    'If you want to do a full grid search, ignore this.',
                         default=99999999)
     parser.add_argument('--q_strat_name', type=str, help='A modAL query_strategy or from query_strategies.py')
+    # gu still works with 9999999, but not with one more 9
     parser.add_argument('--q_strat_dict_path', type=str, help='Path to kwargs for query_strategy. '
                                                          'Leave out if you dont want to specify kwargs.', default="")
     parser.add_argument('--built_in_data', type=bool,
                         help='Currently, always set True. True iff sklearn dataset is to be used', default='True')
-    parser.add_argument('--data_name', type=str, help='sklearn dataset or path to a dataset')
+    parser.add_argument('--data_name', type=str, help='sklearn dataset or path to a dataset. Try not ')
     parser.add_argument('--metrics_path', type=str, help='Path to metrics settings.'
                                                          'If left out, only learner.score will be tracked.', default="")
     parser.add_argument('--test_ratio', type=float, help='What ratio to use for test set relative to total set')
