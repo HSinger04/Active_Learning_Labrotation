@@ -66,18 +66,6 @@ def _load_data(built_in_data, data_name, test_ratio):
         if data_name in {"fetch_20newsgroups", "fetch_20newsgroups_vectorized", "fetch_lfw_pairs", "fetch_rcv1"}:
             X_train_and_val, y_train_and_val = data_loader(return_X_y=True, subset="train")
             X_test, y_test = data_loader(return_X_y=True, subset="test")
-            # TODO
-            """
-            # HACK: shrink feature dimension to avoid OOM error
-            if data_name == "fetch_20newsgroups_vectorized":
-                feat_dim = X_train_and_val.shape[1]
-                # Shrink feature dim to around 2000
-                filter_idx = np.arange(feat_dim, step=feat_dim // 2000)
-                mask = np.zeros(feat_dim, dtype=bool)
-                mask[filter_idx] = True
-                X_train_and_val = X_train_and_val[:, mask]
-                X_test = X_test[:, mask]
-            """
         else:
             X, y = data_loader(return_X_y=True)
     else:
@@ -109,7 +97,7 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
         # initialize list for tracking models
         models = []
 
-        time_diffs = []
+        query_times = []
 
         for train_ind, val_ind in train_and_val_splitter.split(X_train_and_val):
 
@@ -127,8 +115,8 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
             predictor = pred_class(**hyper_params)
             learner = ActiveLearner(predictor, call_q_strat, X_training=X_training, y_training=y_training)
 
-            # for tracking time
-            local_time_diffs = []
+            # for tracking query time
+            local_query_times = []
 
             init_num_X_pool = X_pool.shape[0]
             # TODO: Feel free to use condition of your choice
@@ -136,7 +124,7 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
                 # query and track time
                 start = time()
                 query_idx, _ = learner.query(X_pool, X_training, q_strat_name, q_strat_dict)
-                local_time_diffs.append(time() - start)
+                local_query_times.append(time() - start)
                 # teach learner
                 learner.teach(X_pool[query_idx], y_pool[query_idx])
 
@@ -156,7 +144,7 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
                 y_pool = np.delete(y_pool, query_idx, axis=0)
 
             # track time
-            time_diffs.append(np.mean(local_time_diffs))
+            query_times.append(np.mean(local_query_times))
 
             # track validation scores
             metric_scores = _get_metrics(learner, X_val, y_val, metrics)
@@ -169,7 +157,7 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
         # record val score for this hyper param setting
         to_track[str(hyper_params)] = {VAL_SCORES: local_val_scores,
                                        MODELS: models,
-                                       "time_diffs": time_diffs}
+                                       "query_time": query_times}
 
     return to_track
 
@@ -187,7 +175,6 @@ def _test(tracked_info, X_test, y_test, metrics):
 def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_strat_dict, data_name):
     # remove unnecessary information
     for v in tracked_info.values():
-        # TODO: Confirm that entries really get deleted
         del v[MODELS]
 
     # remove potential slash
@@ -197,7 +184,6 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
     # record some information
     tracked_info["q_strat_config"] = q_strat_dict
 
-    # TODO: Check
     params_part = _extr_last_slash_ind(params)
     q_strat_part = _extr_last_slash_ind(q_strat_dict_path)
     data_part = _extr_last_slash_ind(data_name)
@@ -206,7 +192,7 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
 
     # Save information
     with open(result_dir + "/" + params_part + AND + q_strat_part + AND + data_part, "w") as result_file:
-        json.dump(tracked_info, result_file)
+        json.dump(tracked_info, result_file, indent="\t")
 
 
 def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, data_name, metrics_path,
@@ -264,7 +250,7 @@ if __name__ == '__main__':
                                                          'Leave out if you dont want to specify kwargs.', default="")
     parser.add_argument('--built_in_data', type=bool,
                         help='Currently, always set True. True iff sklearn dataset is to be used', default='True')
-    parser.add_argument('--data_name', type=str, help='sklearn dataset or path to a dataset. Try not ')
+    parser.add_argument('--data_name', type=str, help='sklearn dataset or path to a dataset.')
     parser.add_argument('--metrics_path', type=str, help='Path to metrics settings.'
                                                          'If left out, only learner.score will be tracked.', default="")
     parser.add_argument('--test_ratio', type=float, help='What ratio to use for test set relative to total set')
