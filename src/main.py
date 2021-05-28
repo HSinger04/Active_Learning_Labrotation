@@ -17,12 +17,13 @@ VAL_SCORES = "val_scores"
 DEF_SCORE = "def_score"
 
 # default settings for main and args
-DEF_N_ITER=99999999
+DEF_N_ITER = 99999999
 DEF_Q_STRAT_DICT_PATH = ""
 DEF_BUILT_IN_DATA = True
 DEF_METRICS_PATH = ""
 DEF_SPLITTER = "KFold"
 DEF_RESULT_DIR = "../results"
+
 
 def _extr_str_wo_last_slash(string):
     """Extract string without last /"""
@@ -99,6 +100,9 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
     to_track = {}
 
     for hyper_params in sampler:
+        print("Start with hyper_params: " + str(hyper_params))
+        start_time = time()
+
         # initialize local_val_scores with empty lists
         local_val_scores = {DEF_SCORE: []}
         for name in metrics.keys():
@@ -109,7 +113,9 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
 
         query_times = []
 
-        for train_ind, val_ind in train_and_val_splitter.split(X_train_and_val):
+        # each data split can only be iterated over once
+        num_iter = str(len([elem for elem in train_and_val_splitter.split(X_train_and_val)]))
+        for i, (train_ind, val_ind) in enumerate(train_and_val_splitter.split(X_train_and_val)):
 
             # Define validation dataset
             X_val = X_train_and_val[val_ind]
@@ -164,10 +170,13 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
             # track learner
             models.append(learner)
 
+            print("Complete split #" + str(i + 1) + " out of " + num_iter)
+
         # record val score for this hyper param setting
         to_track[str(hyper_params)] = {VAL_SCORES: local_val_scores,
                                        MODELS: models,
                                        "query_time": query_times}
+        print("Training time: " + str(time() - start_time) + "\n")
 
     return to_track
 
