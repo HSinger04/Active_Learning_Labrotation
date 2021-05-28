@@ -114,8 +114,8 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
         query_times = []
 
         # each data split can only be iterated over once
-        num_iter = str(len([elem for elem in train_and_val_splitter.split(X_train_and_val)]))
-        for i, (train_ind, val_ind) in enumerate(train_and_val_splitter.split(X_train_and_val)):
+        num_iter = str(len([elem for elem in train_and_val_splitter.split(X_train_and_val, y_train_and_val)]))
+        for i, (train_ind, val_ind) in enumerate(train_and_val_splitter.split(X_train_and_val, y=y_train_and_val)):
 
             # Define validation dataset
             X_val = X_train_and_val[val_ind]
