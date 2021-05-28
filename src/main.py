@@ -5,7 +5,7 @@ import numpy as np
 import scipy.sparse
 from sklearn.ensemble import *
 from sklearn.datasets import *
-from sklearn.model_selection import ParameterSampler, KFold, train_test_split
+from sklearn.model_selection import ParameterSampler, KFold, StratifiedKFold, train_test_split
 from sklearn.metrics import *
 from modAL import ActiveLearner
 from time import time
