@@ -16,8 +16,16 @@ MODELS = "models"
 VAL_SCORES = "val_scores"
 DEF_SCORE = "def_score"
 
+# default settings for main and args
+DEF_N_ITER=99999999
+DEF_Q_STRAT_DICT_PATH = ""
+DEF_BUILT_IN_DATA = True
+DEF_METRICS_PATH = ""
+DEF_SPLITTER = "KFold"
+DEF_RESULT_DIR = "../results"
 
-def _extr_last_slash_ind(string):
+def _extr_str_wo_last_slash(string):
+    """Extract string without last /"""
     indices = [m.start(0) for m in re.finditer("/", string)]
     if indices:
         string = string[indices[-1]+1:]
@@ -26,6 +34,7 @@ def _extr_last_slash_ind(string):
     # if there is no "/", just return original string
     else:
         return string
+
 
 def _get_metrics(learner, X, y_true, metrics):
     """Get various metric scores for learner on X
@@ -85,6 +94,7 @@ def _load_data(built_in_data, data_name, test_ratio):
 
 
 def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict, labeled_ratio, pred_class, metrics):
+    """Trains active learner sampled from sampler, iterating over datasets from train_and_val_splitter."""
     # dictionary that keeps track of avg. validation score per model
     to_track = {}
 
@@ -163,6 +173,7 @@ def _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_
 
 
 def _test(tracked_info, X_test, y_test, metrics):
+    """Returns tracked_info with metrics of best validated model tested on X_test, y_test"""
     for k, v in tracked_info.items():
         # test model with best DEF_SCORE
         best_mod_idx = np.argsort(v[VAL_SCORES][DEF_SCORE])[-1]
@@ -173,6 +184,8 @@ def _test(tracked_info, X_test, y_test, metrics):
 
 
 def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_strat_dict, data_name):
+    """Processes and saves tracked_info as .json in result_dir
+    using a file name composed of params, q_strat_dict_path and data_name"""
     # remove unnecessary information
     for v in tracked_info.values():
         del v[MODELS]
@@ -184,9 +197,9 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
     # record some information
     tracked_info["q_strat_config"] = q_strat_dict
 
-    params_part = _extr_last_slash_ind(params)
-    q_strat_part = _extr_last_slash_ind(q_strat_dict_path)
-    data_part = _extr_last_slash_ind(data_name)
+    params_part = _extr_str_wo_last_slash(params)
+    q_strat_part = _extr_str_wo_last_slash(q_strat_dict_path)
+    data_part = _extr_str_wo_last_slash(data_name)
 
     AND = ", "
 
@@ -195,8 +208,25 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
         json.dump(tracked_info, result_file, indent="\t")
 
 
-def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, data_name, metrics_path,
-         test_ratio, train_ratio, labeled_ratio, splitter, result_dir):
+def main(pred, params, q_strat_name, data_name, test_ratio, train_ratio, labeled_ratio, built_in_data=DEF_BUILT_IN_DATA,
+         n_iter=DEF_N_ITER, splitter=DEF_SPLITTER, metrics_path=DEF_METRICS_PATH,
+         q_strat_dict_path=DEF_Q_STRAT_DICT_PATH, result_dir=DEF_RESULT_DIR):
+    """Trains an active learner and saves some interesting information in a .json file
+
+    :param pred: An sklearn predictor e.g. RandomForestClassifier
+    :param params: Path to parameter search space to sample from.
+    :param n_iter: Number of parameter settings that are to be sampled. If you want to do a full grid search, ignore this.
+    :param q_strat_name: A modAL query_strategy or from query_strategies.py
+    :param q_strat_dict_path: Path to kwargs for query_strategy. Leave out if you dont want to specify kwargs.
+    :param built_in_data: Currently, should always be set True. True iff sklearn dataset is to be used
+    :param data_name: sklearn dataset or path to a dataset
+    :param metrics_path: Path to metrics settings. If left out, only learner.score will be tracked.
+    :param test_ratio: What ratio to use for test set relative to total set
+    :param train_ratio: What ratio to use for train set relative to validation set
+    :param labeled_ratio: What ratio to use as initial labeled set for active learning
+    :param splitter: What sklearn Splitter Class to use
+    :param result_dir: Where to save results. If default, will save in ../results
+    """
     pred_class = eval(pred)
 
     # Initiate parameter sampler
@@ -222,8 +252,8 @@ def main(pred, params, n_iter, q_strat_name, q_strat_dict_path, built_in_data, d
     # Load data
     X_train_and_val, y_train_and_val, X_test, y_test = _load_data(built_in_data, data_name, test_ratio)
 
-    # Object that will do e.g. KFold-Cross-Validation for us
     train_and_val_n_splits = int(1 / (1 - train_ratio))
+    # Object that will do e.g. KFold-Cross-Validation for us
     train_and_val_splitter = eval(splitter)(n_splits=train_and_val_n_splits)
 
     tracked_info = _train(sampler, train_and_val_splitter, X_train_and_val, y_train_and_val, q_strat_name, q_strat_dict,
@@ -243,21 +273,20 @@ if __name__ == '__main__':
     parser.add_argument('--params', type=str, help='Path to parameter search space to sample from.')
     parser.add_argument('--n_iter', type=int, help='Number of parameter settings that are to be sampled. '
                                                    'If you want to do a full grid search, ignore this.',
-                        default=99999999)
+                        default=DEF_N_ITER)
     parser.add_argument('--q_strat_name', type=str, help='A modAL query_strategy or from query_strategies.py')
-    # gu still works with 9999999, but not with one more 9
     parser.add_argument('--q_strat_dict_path', type=str, help='Path to kwargs for query_strategy. '
-                                                         'Leave out if you dont want to specify kwargs.', default="")
+                                                         'Leave out if you dont want to specify kwargs.', default=DEF_Q_STRAT_DICT_PATH)
     parser.add_argument('--built_in_data', type=bool,
-                        help='Currently, always set True. True iff sklearn dataset is to be used', default='True')
+                        help='Currently, should always be set True. True iff sklearn dataset is to be used', default=DEF_BUILT_IN_DATA)
     parser.add_argument('--data_name', type=str, help='sklearn dataset or path to a dataset.')
-    parser.add_argument('--metrics_path', type=str, help='Path to metrics settings.'
-                                                         'If left out, only learner.score will be tracked.', default="")
+    parser.add_argument('--metrics_path', type=str, help='Path to metrics settings.' 
+                                                         'If left out, only learner.score will be tracked.', default=DEF_METRICS_PATH)
     parser.add_argument('--test_ratio', type=float, help='What ratio to use for test set relative to total set')
-    parser.add_argument('--train_ratio', type=float, help='What ratio to use for _train set relative to validation set')
+    parser.add_argument('--train_ratio', type=float, help='What ratio to use for train set relative to validation set')
     parser.add_argument('--labeled_ratio', type=float,
                         help='What ratio to use as initial labeled set for active learning')
-    parser.add_argument('--splitter', type=str, help='What sklearn Splitter Class to use', default='KFold')
-    parser.add_argument('--result_dir', type=str, help='Where to save results. If default, will save in ../results', default='../results')
+    parser.add_argument('--splitter', type=str, help='What sklearn Splitter Class to use', default=DEF_SPLITTER)
+    parser.add_argument('--result_dir', type=str, help='Where to save results. If default, will save in ../results', default=DEF_RESULT_DIR)
 
     main(**vars(parser.parse_args()))

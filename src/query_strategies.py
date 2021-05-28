@@ -11,7 +11,7 @@ def _sorted_pairwise_dist(x, y, metric):
     :param x: nd.array or csr_matrix to compare with y
     :param y: nd.array or csr_matrix to compare with x
     :param metric: What metric to use for distance calculation
-    :return: np.ndarray of pair-wise distances
+    :return: sorted np.ndarray of pair-wise distances
     """
     dist = None
     # needed as sqeuclidean implementation for sparse matrices doesnt exist
@@ -27,6 +27,7 @@ def _sorted_pairwise_dist(x, y, metric):
                                 "Check sklearn.metrics.pairwise_distance's documentation")
             else:
                 raise t
+
     sorted_dist = np.sort(dist, axis=1)
     return sorted_dist
 
