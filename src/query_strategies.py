@@ -5,15 +5,16 @@ from sklearn.preprocessing import minmax_scale
 from scipy.sparse import csr_matrix
 
 
-def _sorted_pairwise_dist(x, y, metric):
+def _pairwise_dist(x, y, metric):
     """Calculates pair-wise distances between row vectors of x and y.
 
     :param x: nd.array or csr_matrix to compare with y
     :param y: nd.array or csr_matrix to compare with x
     :param metric: What metric to use for distance calculation
-    :return: sorted np.ndarray of pair-wise distances
+    :return: np.ndarray of pair-wise distances
     """
     dist = None
+
     # needed as sqeuclidean implementation for sparse matrices doesnt exist
     if metric == "sqeuclidean" and (x.__class__ == csr_matrix or y.__class__ == csr_matrix):
         dist = pairwise_distances(x, y)
@@ -27,9 +28,35 @@ def _sorted_pairwise_dist(x, y, metric):
                                 "Check sklearn.metrics.pairwise_distance's documentation")
             else:
                 raise t
+    return dist
 
+
+def _sorted_pairwise_dist(x, y, metric):
+    """Calculates sorted pair-wise distances between row vectors of x and y.
+
+    :param x: nd.array or csr_matrix to compare with y
+    :param y: nd.array or csr_matrix to compare with x
+    :param metric: What metric to use for distance calculation
+    :return: sorted np.ndarray of pair-wise distances
+    """
+
+    dist = _pairwise_dist(x, y, metric)
     sorted_dist = np.sort(dist, axis=1)
     return sorted_dist
+
+
+def _information_density(X_pool, k, metric):
+    """Basically modAL.density.information_density, just a bit more general and normalized.
+
+    :param X_pool: dataset to sample from
+    :param k: dummy argument for common arguments with _gu_density
+    :param metric: what metric to use.
+    :return: sorted information density
+    """
+    dist = _pairwise_dist(X_pool, X_pool, metric)
+    similarity_mtx = 1 / (1 + dist)
+    similarities = similarity_mtx.mean(axis=1)
+    return minmax_scale(similarities)
 
 
 def _gu_uncertainty(rf, X_pool):
@@ -80,7 +107,7 @@ def _gu_diversity(X_pool, X_training, k=1, metric="sqeuclidean"):
 
 
 def gu_sampling(rf, X_pool, X_training, k_den, k_div=1, metric_den="sqeuclidean", metric_div="sqeuclidean",
-                weights=[1, 1, -1], n_iter=1):
+                weights=[1, 1, -1], n_iter=1, den_func="_gu_density"):
     """ Performs sampling based on Gu, Zydek and Jin 2015
 
     :param rf: sklearn random forest
@@ -92,6 +119,7 @@ def gu_sampling(rf, X_pool, X_training, k_den, k_div=1, metric_den="sqeuclidean"
     :param metric_div: what metric to use for diversity. defaults to sqeuclidean like in gu
     :param weights: how to weight unc, den and div. defaults to gu's weights
     :param n_iter: how many samples to query. default to 1
+    :param den_func: What density function to use. defaults to gu's
     :return:
     """
 
@@ -99,7 +127,7 @@ def gu_sampling(rf, X_pool, X_training, k_den, k_div=1, metric_den="sqeuclidean"
         raise ValueError("Weights must be an iterable consisting of three numbers")
 
     unc = _gu_uncertainty(rf, X_pool)
-    den = _gu_density(X_pool, k_den, metric=metric_den)
+    den = eval(den_func)(X_pool, k_den, metric=metric_den)
     div = _gu_diversity(X_pool, X_training, k=k_div, metric=metric_div)
 
     unc *= weights[0]
