@@ -30,11 +30,8 @@ def _extr_str_wo_last_slash(string):
     indices = [m.start(0) for m in re.finditer("/", string)]
     if indices:
         string = string[indices[-1]+1:]
-        string = re.sub(".json", "", string)
-        return string
-    # if there is no "/", just return original string
-    else:
-        return string
+    string = re.sub(".json", "", string)
+    return string
 
 
 def _get_metrics(learner, X, y_true, metrics):
@@ -213,7 +210,7 @@ def _save_tracked_info(tracked_info, result_dir, params, q_strat_dict_path, q_st
     AND = ", "
 
     # Save information
-    with open(result_dir + "/" + params_part + AND + q_strat_part + AND + data_part, "w") as result_file:
+    with open(result_dir + "/" + params_part + AND + q_strat_part + AND + data_part + ".json", "w") as result_file:
         json.dump(tracked_info, result_file, indent="\t")
 
 

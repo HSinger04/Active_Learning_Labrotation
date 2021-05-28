@@ -58,6 +58,6 @@
 	},
 	"q_strat_config": {
 		"k_den": 5,
-		"n_iter": 2000
+		"n_instances": 2000
 	}
 }

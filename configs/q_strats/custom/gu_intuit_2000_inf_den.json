@@ -1,6 +1,6 @@
 {
   "weights": [-1, -1, -1],
   "k_den" : 5,
-  "n_iter": 2000,
+  "n_instances": 2000,
   "den_func": "_information_density"
 }

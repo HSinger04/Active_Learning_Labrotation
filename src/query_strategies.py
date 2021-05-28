@@ -107,7 +107,7 @@ def _gu_diversity(X_pool, X_training, k=1, metric="sqeuclidean"):
 
 
 def gu_sampling(rf, X_pool, X_training, k_den, k_div=1, metric_den="sqeuclidean", metric_div="sqeuclidean",
-                weights=[1, 1, -1], n_iter=1, den_func="_gu_density"):
+                weights=[1, 1, -1], n_instances=1, den_func="_gu_density"):
     """ Performs sampling based on Gu, Zydek and Jin 2015
 
     :param rf: sklearn random forest
@@ -118,7 +118,7 @@ def gu_sampling(rf, X_pool, X_training, k_den, k_div=1, metric_den="sqeuclidean"
     :param metric_den: what metric to use for density. defaults to sqeuclidean like in gu
     :param metric_div: what metric to use for diversity. defaults to sqeuclidean like in gu
     :param weights: how to weight unc, den and div. defaults to gu's weights
-    :param n_iter: how many samples to query. default to 1
+    :param n_instances: how many samples to query. default to 1
     :param den_func: What density function to use. defaults to gu's
     :return:
     """
@@ -135,8 +135,8 @@ def gu_sampling(rf, X_pool, X_training, k_den, k_div=1, metric_den="sqeuclidean"
     div *= weights[2]
 
     s_array = unc + den + div
-    # pick n_iter best rated samples
-    query_idx = np.argsort(s_array)[:n_iter]
+    # pick n_instances best rated samples
+    query_idx = np.argsort(s_array)[:n_instances]
 
     mask = np.ones(X_pool.shape[0], dtype=bool)
     mask[query_idx] = False
